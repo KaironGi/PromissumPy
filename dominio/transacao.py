@@ -9,3 +9,7 @@ from dominio.excecoes import ExcecaoDeDominio
 # frozen = true torna a transação imutavel
 # uma vez criada, nao altera
 # Isso é importante para consistencia financeira
+@dataclass(frozen=true)
+class Transacao:
+    #identificador da operação
+    operacao_id:UUID
