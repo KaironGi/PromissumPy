@@ -16,4 +16,4 @@ class StatusCliente(Enum):
 class TipoTransacao(Enum):
     DEPOSITAR = "DEPOSITAR"
     SACAR = "SACAR"
-    
+    TRANSFERENCIA = "TRANSFERENCIA"
