@@ -1,20 +1,23 @@
 from uuid import uuid4
 from decimal import Decimal
 
-from dominio.enums import TipoTransacao, StatusConta
+from dominio.enums import TipoTransacao
 from dominio.transacao import Transacao
 from dominio.conta import Conta
 from dominio.excecoes import ExcecaoDeDominio
+from dominio.validadores.validador_conta import ValidadorConta
 
 
-#Classe da logica 
+# Classe da lógica
 class ServicoConta:
 
-    #Construtor
-    def __init__(self, repositorio_conta, repositorio_transacao):
+    # Construtor
+    def __init__(self, repositorio_conta, repositorio_transacao, verificador_login):
 
         self.repositorio_conta = repositorio_conta
         self.repositorio_transacao = repositorio_transacao
+        self.verificador_login = verificador_login
+
 
     def criar_conta(self, cliente):
 
@@ -24,7 +27,8 @@ class ServicoConta:
 
         return conta
 
-    #Calculo de saldo baseado nas transacoes
+
+    # Calculo de saldo baseado nas transacoes
     def calcular_saldo(self, conta):
 
         transacoes = self.repositorio_transacao.listar_por_conta(conta)
@@ -49,72 +53,88 @@ class ServicoConta:
 
         return saldo
 
-    #Realiza depósito
-    def depositar(self, conta, valor):
+
+    # Realiza depósito
+    def depositar(self, user_id, token, conta, valor):
+
+        self.verificador_login.verificar_acesso(user_id, token)
+
+        if conta.cliente_id != user_id:
+            raise ExcecaoDeDominio("Usuário não autorizado a operar esta conta")
 
         if valor <= 0:
             raise ExcecaoDeDominio("Valor inválido")
 
-        # Verifica se conta está ativa
-        if conta.status != StatusConta.ATIVO:
-            raise ExcecaoDeDominio("Conta não está ativa")
+        ValidadorConta.verificar_conta_ativa(conta)
 
-        # Cria transação de depósito
-        transacao = Transacao(
-            tipo=TipoTransacao.DEPOSITAR,
+        # chama a lógica da entidade
+        conta.depositar(
             operacao_id=uuid4(),
             valor=valor,
-            conta_destino=conta
+            versao_esperada=conta.versao
         )
 
-        self.repositorio_transacao.registrar(transacao)
+        # salva a conta atualizada
+        self.repositorio_conta.salvar(conta)
+
 
     # Realiza saque
-    def sacar(self, conta, valor):
+    def sacar(self, user_id, token, conta, valor):
+
+        self.verificador_login.verificar_acesso(user_id, token)
+
+        if conta.cliente_id != user_id:
+            raise ExcecaoDeDominio("Usuário não autorizado a operar esta conta")
 
         if valor <= 0:
             raise ExcecaoDeDominio("Valor inválido")
 
-        if conta.status != StatusConta.ATIVO:
-            raise ExcecaoDeDominio("Conta não está ativa")
+        ValidadorConta.verificar_conta_ativa(conta)
 
-        saldo = self.calcular_saldo(conta)
-
-        if saldo < valor:
-            raise ExcecaoDeDominio("Saldo insuficiente")
-
-        transacao = Transacao(
-            tipo=TipoTransacao.SACAR,
+        # chama a lógica da entidade
+        conta.sacar(
             operacao_id=uuid4(),
             valor=valor,
-            conta_origem=conta
+            versao_esperada=conta.versao
         )
 
-        self.repositorio_transacao.registrar(transacao)
+        # salva conta atualizada
+        self.repositorio_conta.salvar(conta)
+
 
     # Realiza transferência entre contas
-    def transferir(self, origem, destino, valor):
+    def transferir(self, user_id, token, origem, destino, valor):
+
+        self.verificador_login.verificar_acesso(user_id, token)
+
+        if origem.cliente_id != user_id:
+            raise ExcecaoDeDominio("Usuário não autorizado a operar esta conta")
 
         if valor <= 0:
             raise ExcecaoDeDominio("Valor inválido")
 
-        if origem.status != StatusConta.ATIVO:
-            raise ExcecaoDeDominio("Conta origem inativa")
+        ValidadorConta.verificar_conta_ativa(origem)
+        ValidadorConta.verificar_conta_ativa(destino)
 
-        if destino.status != StatusConta.ATIVO:
-            raise ExcecaoDeDominio("Conta destino inativa")
-
-        saldo = self.calcular_saldo(origem)
+        saldo = origem.saldo
 
         if saldo < valor:
             raise ExcecaoDeDominio("Saldo insuficiente")
 
-        transacao = Transacao(
-            tipo=TipoTransacao.TRANSFERENCIA,
+        # saque da origem
+        origem.sacar(
             operacao_id=uuid4(),
             valor=valor,
-            conta_origem=origem,
-            conta_destino=destino
+            versao_esperada=origem.versao
         )
 
-        self.repositorio_transacao.registrar(transacao)
+        # depósito no destino
+        destino.depositar(
+            operacao_id=uuid4(),
+            valor=valor,
+            versao_esperada=destino.versao
+        )
+
+        # salva ambas contas
+        self.repositorio_conta.salvar(origem)
+        self.repositorio_conta.salvar(destino)
